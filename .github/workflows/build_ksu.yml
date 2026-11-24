@@ -18,6 +18,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf imagemagick libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 clang lld llvm binutils-aarch64-linux-gnu
 
+      - name: Inspect Official Build Scripts and Headers
+        run: |
+          echo "=== Files in root & Apollo ==="
+          ls -la
+          ls -la Apollo/ 2>/dev/null || true
+          echo "=== Build script contents ==="
+          cat Apollo/*.sh 2>/dev/null || true
+          cat build*.sh 2>/dev/null || true
+          echo "=== Location of spinlock.h ==="
+          find . -path "*kernel/spinlock.h"
+          echo "=== Defconfigs ==="
+          find arch/arm64/configs -maxdepth 2 -type f
+
       - name: Patch Header Conflicts
         run: |
           python3 -c '
@@ -31,14 +44,12 @@ jobs:
               content = content[:second.start()] + content[second.end():]
               with open("include/linux/bpf.h", "w") as f:
                   f.write(content)
-              print("Patched include/linux/bpf.h")
 
           with open("include/linux/exynos-ss.h", "r") as f:
               ss = f.read()
           ss = re.sub(r"^#define\s+s3c2410wdt_set_emergency_reset\(.*$", "// patched", ss, flags=re.MULTILINE)
           with open("include/linux/exynos-ss.h", "w") as f:
               f.write(ss)
-          print("Patched include/linux/exynos-ss.h")
           '
 
       - name: Configure and Build Kernel
@@ -50,17 +61,27 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # استخدام Clang + LLVM_IAS=1 (لحل exynos-m3) مع ترك LD الافتراضي لـ aarch64-linux-gnu-ld (لحل -r)
-          make CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 crownlte_defconfig
+          # إيجاد المجلد الأب الذي يحتوي على kernel/spinlock.h
+          SPINLOCK_PATH=$(find . -path "*/kernel/spinlock.h" | grep -v "^./include/kernel" | head -n 1)
+          EXTRA_INC=""
+          if [ -n "$SPINLOCK_PATH" ]; then
+            INC_BASE=$(dirname $(dirname "$SPINLOCK_PATH"))
+            echo "Found pwrcal include base: $INC_BASE"
+            EXTRA_INC="-I$(pwd)/$INC_BASE"
+          fi
 
-          # تفعيل KernelSU-Next و Kprobes
+          # تعطيل LTO_CLANG إن كان يسبب تمرير -f للرابط
+          make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 crownlte_defconfig
+
           scripts/config -e KSU
           scripts/config -e KPROBES
           scripts/config -e HAVE_KPROBES
           scripts/config -e KPROBE_EVENTS
+          scripts/config -d LTO_CLANG
+          scripts/config -d THINLTO
 
-          make CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
-          make -j$(nproc) CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="-I$(pwd)/include/linux" Image
+          make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
+          make -j$(nproc) CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="$EXTRA_INC" Image
 
       - name: Upload Compiled Kernel Image
         uses: actions/upload-artifact@v4
