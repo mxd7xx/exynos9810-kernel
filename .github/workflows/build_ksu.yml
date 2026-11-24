@@ -21,13 +21,17 @@ jobs:
       - name: Fix Duplicate BPF Functions in Header
         run: |
           python3 -c '
+          import re
           with open("include/linux/bpf.h", "r") as f:
-              lines = f.readlines()
-          if len(lines) > 805 and "__bpf_prog_charge" in lines[794]:
-              del lines[794:805]
+              content = f.read()
+          pattern = r"static inline int __bpf_prog_charge\(.*?\}\s*static inline void __bpf_prog_uncharge\(.*?\}"
+          matches = list(re.finditer(pattern, content, re.DOTALL))
+          if len(matches) >= 2:
+              second = matches[1]
+              content = content[:second.start()] + content[second.end():]
               with open("include/linux/bpf.h", "w") as f:
-                  f.writelines(lines)
-              print("Removed duplicate __bpf_prog_charge block.")
+                  f.write(content)
+              print("Successfully removed the second duplicate BPF block.")
           '
 
       - name: Configure and Build Kernel with LLVM
