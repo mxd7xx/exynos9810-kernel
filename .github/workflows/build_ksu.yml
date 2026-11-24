@@ -16,7 +16,11 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf imagemagick libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 clang lld llvm binutils-aarch64-linux-gnu device-tree-compiler
+          sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf imagemagick libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 clang lld llvm device-tree-compiler
+
+      - name: Setup Android Binutils 4.9 (for Kernel 4.9 Linker)
+        run: |
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 gcc_toolchain
 
       - name: Patch Header Conflicts
         run: |
@@ -39,28 +43,31 @@ jobs:
               f.write(ss)
           '
 
-      - name: Inspect Apollo Folder (For Reference)
-        run: |
-          ls -la Apollo/ 2>/dev/null || true
-          cat Apollo/*.sh 2>/dev/null || true
-
       - name: Configure and Build Kernel
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
           export ANDROID_MAJOR_VERSION=q
           export PLATFORM_VERSION=10
-          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE=$(pwd)/gcc_toolchain/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # البحث عن ملف Apollo defconfig الخاص بـ Note 9 إن وجد
+          # استعادة مسار ترويسات pwrcal-env.h (types.h / spinlock.h)
+          SPINLOCK_PATH=$(find . -path "*/kernel/spinlock.h" | grep -v "^./include/kernel" | head -n 1)
+          EXTRA_INC=""
+          if [ -n "$SPINLOCK_PATH" ]; then
+            INC_BASE=$(dirname $(dirname "$SPINLOCK_PATH"))
+            echo "Found pwrcal include base: $INC_BASE"
+            EXTRA_INC="-I$(pwd)/$INC_BASE"
+          fi
+
+          # البحث عن ملف Apollo defconfig الخاص بـ Note 9
           APOLLO_DEF=$(find arch/arm64/configs -name "*apollo*crownlte*" -o -name "*crownlte*apollo*" | head -n 1 | xargs -r basename)
           echo "Using Defconfig: ${APOLLO_DEF:-crownlte_defconfig}"
 
-          # فصل أدوات المضيف (HOSTCC=gcc) عن أدوات الهدف (ARM64) واستخدام رابط GNU المدمج لـ ARM64
-          make HOSTCC=gcc HOSTLD=ld CC="clang --prefix=/usr/aarch64-linux-gnu/bin/" AR=aarch64-linux-gnu-ar NM=aarch64-linux-gnu-nm OBJCOPY=aarch64-linux-gnu-objcopy OBJDUMP=aarch64-linux-gnu-objdump STRIP=aarch64-linux-gnu-strip LLVM_IAS=1 ${APOLLO_DEF:-crownlte_defconfig}
+          # دمج Clang + LLVM_IAS=1 (لدعم exynos-m3) مع رابط أندرويد 4.9 (لدعم -r و LTO)
+          make HOSTCC=gcc HOSTLD=ld CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 ${APOLLO_DEF:-crownlte_defconfig}
 
-          # تفعيل تبعيات الذاكرة (MIGRATION/COMPACTION) و KernelSU-Next
           scripts/config -e MIGRATION
           scripts/config -e COMPACTION
           scripts/config -e KSU
@@ -68,8 +75,8 @@ jobs:
           scripts/config -e HAVE_KPROBES
           scripts/config -e KPROBE_EVENTS
 
-          make HOSTCC=gcc HOSTLD=ld CC="clang --prefix=/usr/aarch64-linux-gnu/bin/" AR=aarch64-linux-gnu-ar NM=aarch64-linux-gnu-nm OBJCOPY=aarch64-linux-gnu-objcopy OBJDUMP=aarch64-linux-gnu-objdump STRIP=aarch64-linux-gnu-strip LLVM_IAS=1 olddefconfig
-          make -j$(nproc) HOSTCC=gcc HOSTLD=ld CC="clang --prefix=/usr/aarch64-linux-gnu/bin/" AR=aarch64-linux-gnu-ar NM=aarch64-linux-gnu-nm OBJCOPY=aarch64-linux-gnu-objcopy OBJDUMP=aarch64-linux-gnu-objdump STRIP=aarch64-linux-gnu-strip LLVM_IAS=1 Image
+          make HOSTCC=gcc HOSTLD=ld CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
+          make -j$(nproc) HOSTCC=gcc HOSTLD=ld CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="$EXTRA_INC" Image
 
       - name: Upload Compiled Kernel Image
         uses: actions/upload-artifact@v4
