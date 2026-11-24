@@ -16,9 +16,16 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf imagemagick libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 clang lld llvm device-tree-compiler
+          sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf imagemagick libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 clang lld llvm binutils-aarch64-linux-gnu device-tree-compiler
 
-      - name: Setup Android Binutils 4.9 (for Kernel 4.9 Linker)
+      - name: Print Official Apollo Build Script
+        run: |
+          echo "=== Apollo directory ==="
+          ls -la Apollo/
+          echo "=== Apollo scripts ==="
+          head -n 200 Apollo/*.sh 2>/dev/null || true
+
+      - name: Setup Android Binutils 4.9
         run: |
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 gcc_toolchain
 
@@ -52,21 +59,17 @@ jobs:
           export CROSS_COMPILE=$(pwd)/gcc_toolchain/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # استعادة مسار ترويسات pwrcal-env.h (types.h / spinlock.h)
           SPINLOCK_PATH=$(find . -path "*/kernel/spinlock.h" | grep -v "^./include/kernel" | head -n 1)
           EXTRA_INC=""
           if [ -n "$SPINLOCK_PATH" ]; then
             INC_BASE=$(dirname $(dirname "$SPINLOCK_PATH"))
-            echo "Found pwrcal include base: $INC_BASE"
             EXTRA_INC="-I$(pwd)/$INC_BASE"
           fi
 
-          # البحث عن ملف Apollo defconfig الخاص بـ Note 9
-          APOLLO_DEF=$(find arch/arm64/configs -name "*apollo*crownlte*" -o -name "*crownlte*apollo*" | head -n 1 | xargs -r basename)
-          echo "Using Defconfig: ${APOLLO_DEF:-crownlte_defconfig}"
+          # استخدام Linker أندرويد 4.9 صراحة عبر -fuse-ld
+          export LDFLAGS="-fuse-ld=$(pwd)/gcc_toolchain/bin/aarch64-linux-android-ld"
 
-          # دمج Clang + LLVM_IAS=1 (لدعم exynos-m3) مع رابط أندرويد 4.9 (لدعم -r و LTO)
-          make HOSTCC=gcc HOSTLD=ld CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 ${APOLLO_DEF:-crownlte_defconfig}
+          make HOSTCC=gcc HOSTLD=ld CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 crownlte_defconfig
 
           scripts/config -e MIGRATION
           scripts/config -e COMPACTION
@@ -77,9 +80,3 @@ jobs:
 
           make HOSTCC=gcc HOSTLD=ld CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
           make -j$(nproc) HOSTCC=gcc HOSTLD=ld CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="$EXTRA_INC" Image
-
-      - name: Upload Compiled Kernel Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: crownlte-ksu-Image
-          path: arch/arm64/boot/Image
