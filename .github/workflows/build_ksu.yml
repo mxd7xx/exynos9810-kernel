@@ -36,11 +36,11 @@ jobs:
 
       - name: Inspect Repo Build Scripts and Configs
         run: |
-          ls -la
-          ls -la arch/arm64/configs/*crown* arch/arm64/configs/*exynos9810* 2>/dev/null || true
-          head -n 120 build*.sh 2>/dev/null || true
+          find . -maxdepth 3 -name "*build*" -o -name "*crown*"
+          cat Apollo/*.sh 2>/dev/null || true
+          cat build*.sh 2>/dev/null || true
 
-      - name: Configure and Build Kernel with Repo Configs
+      - name: Configure and Build Kernel
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
@@ -49,32 +49,23 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # استخدام ملف إعدادات exynos9810-crownlte_defconfig الكامل إن وجد
-          if [ -f "arch/arm64/configs/exynos9810-crownlte_defconfig" ]; then
-            DEFCONFIG="exynos9810-crownlte_defconfig"
-          else
-            DEFCONFIG="crownlte_defconfig"
-          fi
-          echo "Selected defconfig: $DEFCONFIG"
+          # البحث عن ملف الإعداد الكامل لـ crownlte
+          DEFCONFIG=$(find arch/arm64/configs -name "*crown*" | sort | head -n 1 | xargs basename)
+          echo "Using defconfig: $DEFCONFIG"
 
           make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 $DEFCONFIG
 
-          # دمج إعدادات OneUI أو KSU الفرعية إن وجدت في مجلد configs
-          for cfg in arch/arm64/configs/*oneui* arch/arm64/configs/*ksu*; do
-            if [ -f "$cfg" ]; then
-              echo "Merging config fragment: $cfg"
-              scripts/kconfig/merge_config.sh -m .config "$cfg"
-            fi
-          done
-
-          # تفعيل KernelSU-Next و Kprobes
+          # تفعيل تعريفات Exynos الضرورية لمنع أخطاء exynos-ss و cal-if
+          scripts/config -e EXYNOS_SNAPSHOT
+          scripts/config -e EXYNOS_SNAPSHOT_ACPM
+          scripts/config -e S3C2410_WATCHDOG
           scripts/config -e KSU
           scripts/config -e KPROBES
           scripts/config -e HAVE_KPROBES
           scripts/config -e KPROBE_EVENTS
 
           make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
-          make -j$(nproc) CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 Image
+          make -j$(nproc) CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="-Idrivers/soc/samsung/cal-if" Image
 
       - name: Upload Compiled Kernel Image
         uses: actions/upload-artifact@v4
