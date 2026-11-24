@@ -18,7 +18,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf imagemagick libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 clang lld llvm binutils-aarch64-linux-gnu
 
-      - name: Patch Header Conflicts (BPF & Exynos-SS)
+      - name: Patch Header Conflicts and Missing Symlinks
         run: |
           python3 -c '
           import re
@@ -42,6 +42,8 @@ jobs:
               f.write(ss)
           print("Patched include/linux/exynos-ss.h")
           '
+          # 3. توفير types.h لملف pwrcal-env.h داخل مجلد cal-if
+          ln -sf $(pwd)/include/linux/types.h drivers/soc/samsung/cal-if/types.h
 
       - name: Configure and Build Kernel
         run: |
@@ -52,25 +54,7 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # البحث عن ملف Apollo defconfig الخاص بـ Note 9 (crownlte) إن وجد
-          APOLLO_CFG=$(find arch/arm64/configs -name "*apollo*crown*" -o -name "*crown*apollo*" | head -n 1)
-          if [ -n "$APOLLO_CFG" ]; then
-            DEFCONFIG=$(basename "$APOLLO_CFG")
-          else
-            DEFCONFIG="crownlte_defconfig"
-          fi
-          echo "Using defconfig: $DEFCONFIG"
-
-          # البحث الآمن عن مجلد types.h الخاص بـ cal-if/acpm
-          TYPES_FILE=$(find drivers/soc/samsung -name "types.h" | head -n 1)
-          EXTRA_CFLAGS=""
-          if [ -n "$TYPES_FILE" ]; then
-            TYPES_DIR=$(dirname "$TYPES_FILE")
-            echo "Found types.h in: $TYPES_DIR"
-            EXTRA_CFLAGS="-I$(pwd)/$TYPES_DIR"
-          fi
-
-          make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 $DEFCONFIG
+          make CC=clang LD=aarch64-linux-gnu-ld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 crownlte_defconfig
 
           # تفعيل KernelSU-Next و Kprobes
           scripts/config -e KSU
@@ -78,8 +62,8 @@ jobs:
           scripts/config -e HAVE_KPROBES
           scripts/config -e KPROBE_EVENTS
 
-          make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
-          make -j$(nproc) CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="$EXTRA_CFLAGS" Image
+          make CC=clang LD=aarch64-linux-gnu-ld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
+          make -j$(nproc) CC=clang LD=aarch64-linux-gnu-ld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 Image
 
       - name: Upload Compiled Kernel Image
         uses: actions/upload-artifact@v4
