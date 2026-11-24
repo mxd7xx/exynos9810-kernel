@@ -34,15 +34,38 @@ jobs:
               print("Successfully removed the second duplicate BPF block.")
           '
 
-      - name: Configure and Build Kernel with LLVM
+      - name: Inspect Repo Build Scripts and Configs
+        run: |
+          ls -la
+          ls -la arch/arm64/configs/*crown* arch/arm64/configs/*exynos9810* 2>/dev/null || true
+          head -n 120 build*.sh 2>/dev/null || true
+
+      - name: Configure and Build Kernel with Repo Configs
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
           export ANDROID_MAJOR_VERSION=q
+          export PLATFORM_VERSION=10
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 crownlte_defconfig
+          # استخدام ملف إعدادات exynos9810-crownlte_defconfig الكامل إن وجد
+          if [ -f "arch/arm64/configs/exynos9810-crownlte_defconfig" ]; then
+            DEFCONFIG="exynos9810-crownlte_defconfig"
+          else
+            DEFCONFIG="crownlte_defconfig"
+          fi
+          echo "Selected defconfig: $DEFCONFIG"
+
+          make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 $DEFCONFIG
+
+          # دمج إعدادات OneUI أو KSU الفرعية إن وجدت في مجلد configs
+          for cfg in arch/arm64/configs/*oneui* arch/arm64/configs/*ksu*; do
+            if [ -f "$cfg" ]; then
+              echo "Merging config fragment: $cfg"
+              scripts/kconfig/merge_config.sh -m .config "$cfg"
+            fi
+          done
 
           # تفعيل KernelSU-Next و Kprobes
           scripts/config -e KSU
