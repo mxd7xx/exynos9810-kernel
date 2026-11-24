@@ -61,9 +61,14 @@ jobs:
           fi
           echo "Using defconfig: $DEFCONFIG"
 
-          # تحديد مسار مجلد types.h داخل cal-if تلقائياً
-          TYPES_DIR=$(find drivers/soc/samsung/cal-if -name "types.h" | head -n 1 | xargs dirname)
-          echo "Found cal-if types.h in: $TYPES_DIR"
+          # البحث الآمن عن مجلد types.h الخاص بـ cal-if/acpm
+          TYPES_FILE=$(find drivers/soc/samsung -name "types.h" | head -n 1)
+          EXTRA_CFLAGS=""
+          if [ -n "$TYPES_FILE" ]; then
+            TYPES_DIR=$(dirname "$TYPES_FILE")
+            echo "Found types.h in: $TYPES_DIR"
+            EXTRA_CFLAGS="-I$(pwd)/$TYPES_DIR"
+          fi
 
           make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 $DEFCONFIG
 
@@ -74,7 +79,7 @@ jobs:
           scripts/config -e KPROBE_EVENTS
 
           make CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
-          make -j$(nproc) CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="-I$(pwd)/$TYPES_DIR" Image
+          make -j$(nproc) CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="$EXTRA_CFLAGS" Image
 
       - name: Upload Compiled Kernel Image
         uses: actions/upload-artifact@v4
