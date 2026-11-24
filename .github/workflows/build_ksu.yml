@@ -41,11 +41,6 @@ jobs:
           print("Patched include/linux/exynos-ss.h")
           '
 
-      - name: Inspect Apollo Folder & Built-in Toolchain
-        run: |
-          ls -la Apollo/ toolchain/ 2>/dev/null || true
-          cat Apollo/*.sh 2>/dev/null || true
-
       - name: Configure and Build Kernel
         run: |
           export ARCH=arm64
@@ -55,8 +50,8 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # استخدام Clang مع رابط GNU عبر عدم كسر LD_LIBRARY_PATH أو تمرير LDFLAGS سليمة
-          make CC=clang HOSTCC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip crownlte_defconfig
+          # استخدام Clang + LLVM_IAS=1 (لحل exynos-m3) مع ترك LD الافتراضي لـ aarch64-linux-gnu-ld (لحل -r)
+          make CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 crownlte_defconfig
 
           # تفعيل KernelSU-Next و Kprobes
           scripts/config -e KSU
@@ -64,8 +59,8 @@ jobs:
           scripts/config -e HAVE_KPROBES
           scripts/config -e KPROBE_EVENTS
 
-          make CC=clang HOSTCC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip olddefconfig
-          make -j$(nproc) CC=clang HOSTCC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip KCFLAGS="-I$(pwd)/include/linux" Image
+          make CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
+          make -j$(nproc) CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 KCFLAGS="-I$(pwd)/include/linux" Image
 
       - name: Upload Compiled Kernel Image
         uses: actions/upload-artifact@v4
