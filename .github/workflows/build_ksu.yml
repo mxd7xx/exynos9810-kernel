@@ -39,7 +39,12 @@ jobs:
               f.write(ss)
           '
 
-      - name: Build with Official Apollo Config and Toolchain
+      - name: Inspect Apollo Folder (For Reference)
+        run: |
+          ls -la Apollo/ 2>/dev/null || true
+          cat Apollo/*.sh 2>/dev/null || true
+
+      - name: Configure and Build Kernel
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
@@ -48,25 +53,12 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # إنشاء رابط ld يوجه إلى aarch64-linux-gnu-ld مع الحفاظ على مسارات النظام
-          mkdir -p $(pwd)/custom_bin
-          ln -sf /usr/bin/aarch64-linux-gnu-ld $(pwd)/custom_bin/ld
-          export PATH="$(pwd)/custom_bin:$PATH"
-
-          # اختيار ملف إعدادات Apollo الكامل الخاص بـ Note 9 (crownlte)
+          # البحث عن ملف Apollo defconfig الخاص بـ Note 9 إن وجد
           APOLLO_DEF=$(find arch/arm64/configs -name "*apollo*crownlte*" -o -name "*crownlte*apollo*" | head -n 1 | xargs -r basename)
-          if [ -z "$APOLLO_DEF" ]; then
-            APOLLO_DEF=$(find arch/arm64/configs -name "*exynos9810*crownlte*" | head -n 1 | xargs -r basename)
-          fi
           echo "Using Defconfig: ${APOLLO_DEF:-crownlte_defconfig}"
 
-          make CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 ${APOLLO_DEF:-crownlte_defconfig}
-
-          # دمج إعدادات OneUI أو KSU الموجودة في المستودع إن وجدت
-          for frag in $(find arch/arm64/configs -name "*oneui*" -o -name "*ksu*"); do
-            echo "Merging $frag"
-            scripts/kconfig/merge_config.sh -m .config "$frag"
-          done
+          # فصل أدوات المضيف (HOSTCC=gcc) عن أدوات الهدف (ARM64) واستخدام رابط GNU المدمج لـ ARM64
+          make HOSTCC=gcc HOSTLD=ld CC="clang --prefix=/usr/aarch64-linux-gnu/bin/" AR=aarch64-linux-gnu-ar NM=aarch64-linux-gnu-nm OBJCOPY=aarch64-linux-gnu-objcopy OBJDUMP=aarch64-linux-gnu-objdump STRIP=aarch64-linux-gnu-strip LLVM_IAS=1 ${APOLLO_DEF:-crownlte_defconfig}
 
           # تفعيل تبعيات الذاكرة (MIGRATION/COMPACTION) و KernelSU-Next
           scripts/config -e MIGRATION
@@ -76,8 +68,8 @@ jobs:
           scripts/config -e HAVE_KPROBES
           scripts/config -e KPROBE_EVENTS
 
-          make CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 olddefconfig
-          make -j$(nproc) CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip LLVM_IAS=1 Image
+          make HOSTCC=gcc HOSTLD=ld CC="clang --prefix=/usr/aarch64-linux-gnu/bin/" AR=aarch64-linux-gnu-ar NM=aarch64-linux-gnu-nm OBJCOPY=aarch64-linux-gnu-objcopy OBJDUMP=aarch64-linux-gnu-objdump STRIP=aarch64-linux-gnu-strip LLVM_IAS=1 olddefconfig
+          make -j$(nproc) HOSTCC=gcc HOSTLD=ld CC="clang --prefix=/usr/aarch64-linux-gnu/bin/" AR=aarch64-linux-gnu-ar NM=aarch64-linux-gnu-nm OBJCOPY=aarch64-linux-gnu-objcopy OBJDUMP=aarch64-linux-gnu-objdump STRIP=aarch64-linux-gnu-strip LLVM_IAS=1 Image
 
       - name: Upload Compiled Kernel Image
         uses: actions/upload-artifact@v4
